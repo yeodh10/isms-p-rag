@@ -1,27 +1,27 @@
 """
-app.py — ISMS-P 인증기준 RAG 챗봇 Streamlit UI
+app.py — ISMS-P 인증기준 RAG 챗봇 + 사전 자가점검 Streamlit UI
 
-기능:
-  - 대화형 챗봇 UI (멀티턴 히스토리) + 스트리밍 답변
-  - 비밀번호 게이트 + 세션 레이트리밋 (공개 앱의 API 비용 남용 방지)
-  - 출처 인용 + 참고한 기준 표시 + 비공식/데이터 출처 고지
+두 가지 모드 (사이드바에서 전환):
+  💬 질문하기      — 기준 검색 + 출처 인용 답변(스트리밍) 챗봇
+  ✅ 사전 자가점검 — 분야별 현황을 입력하면 기준별 충족 여부를 AI가 보조 판단 + 갭 리포트
+
+공통: 비밀번호 게이트 + 세션 레이트리밋(공개 앱 API 비용 보호), 비공식/데이터 출처 고지.
 
 실행: streamlit run app.py
-
-설계 메모:
-  각 질문은 독립적으로 검색·근거화한다(이전 대화를 LLM에 넘기지 않음). 컴플라이언스
-  맥락에서 답변이 항상 '검색된 기준'에만 근거하도록 보장하기 위함이며, 화면에는 대화
-  히스토리로 표시한다.
 """
 
 import hmac
 import os
 import time
+from collections import Counter
 
 import streamlit as st
 
+import assess
+import rag
 from build_index import ensure_index
 from config import (
+    ASSESS_DISCLAIMER,
     DATA_DISCLAIMER,
     DISCLAIMER,
     EMBED_MODEL_NAME,
@@ -29,25 +29,22 @@ from config import (
     RATE_LIMIT_WINDOW_SEC,
     TOP_K,
 )
-import rag
 
-# 페이지 설정 (가장 먼저)
 st.set_page_config(page_title="ISMS-P 인증기준 도우미", page_icon="🔐", layout="centered")
 
 
 def _inject_secret(name: str) -> None:
-    """배포(Streamlit Cloud) 시 secrets를 환경변수로 주입. 로컬은 .env(dotenv) 사용."""
     try:
         if name in st.secrets and not os.environ.get(name):
             os.environ[name] = str(st.secrets[name])
     except Exception:
-        pass  # secrets.toml 없는 로컬 실행
+        pass
 
 
 _inject_secret("ANTHROPIC_API_KEY")
 
 
-# ── 비밀번호 게이트 (APP_PASSWORD 가 설정된 경우에만 활성) ──────────
+# ── 비밀번호 게이트 ─────────────────────────────────────────────
 def _app_password():
     try:
         if "APP_PASSWORD" in st.secrets:
@@ -60,10 +57,10 @@ def _app_password():
 def require_auth() -> bool:
     pw = _app_password()
     if not pw:
-        return True  # 게이트 미설정 → 공개 접근 허용
+        return True
     if st.session_state.get("authed"):
         return True
-    st.title("🔐 ISMS-P 인증기준 RAG 챗봇")
+    st.title("🔐 ISMS-P 인증기준 도우미")
     st.info("이 앱은 비밀번호로 보호됩니다. 접속 비밀번호를 입력하세요.")
     entered = st.text_input("접속 비밀번호", type="password")
     if entered:
@@ -74,7 +71,7 @@ def require_auth() -> bool:
     return False
 
 
-# ── 세션 레이트리밋 ────────────────────────────────────────────
+# ── 세션 레이트리밋 (모드 공유) ─────────────────────────────────
 def _recent_q_times() -> list:
     now = time.time()
     return [t for t in st.session_state.get("q_times", []) if now - t < RATE_LIMIT_WINDOW_SEC]
@@ -88,7 +85,6 @@ def record_question() -> None:
     st.session_state.q_times = _recent_q_times() + [time.time()]
 
 
-# ── 인덱스 준비 (배포 첫 실행 시 자동 빌드) ──────────────────────
 @st.cache_resource(show_spinner="최초 실행: 인증기준 색인을 준비하는 중입니다... (최대 1~2분)")
 def _prepare_index():
     ensure_index()
@@ -107,49 +103,38 @@ def render_sources(sources: list) -> None:
                 st.caption(f"점검항목 예시: {h['checklist']}")
 
 
-# ── 메인 ───────────────────────────────────────────────────────
-if not require_auth():
-    st.stop()
+# ── 모드 1: 질문하기 (챗봇) ─────────────────────────────────────
+def render_chat() -> None:
+    st.caption(
+        "ISMS-P 인증기준(101개)에 대해 질문하면, 관련 기준을 검색해 쉬운 말로 답하고 "
+        "근거 기준 번호를 출처로 인용합니다."
+    )
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
 
-_prepare_index()
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+            if msg.get("sources"):
+                render_sources(msg["sources"])
+                st.caption(f"⚠️ {DISCLAIMER}")
 
-st.info(
-    "ℹ️ 본 도구는 **비공식 참고용**입니다. 공식 인증기준은 "
-    "[KISA ISMS-P 자료실](https://isms.kisa.or.kr)에서 확인하세요."
-)
-st.title("🔐 ISMS-P 인증기준 RAG 챗봇")
-st.caption(
-    "ISMS-P 인증기준(101개)에 대해 질문하면, 관련 기준을 검색해 쉬운 말로 답하고 "
-    "근거 기준 번호를 출처로 인용합니다."
-)
+    clicked = None
+    if not st.session_state.messages:
+        st.write("**예시 질문**")
+        cols = st.columns(3)
+        examples = ["접근통제 관련 기준을 알려주세요", "개인정보 파기에 대한 요구사항은?", "위험평가는 어느 기준?"]
+        for col, ex in zip(cols, examples):
+            if col.button(ex, use_container_width=True):
+                clicked = ex
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+    prompt = st.chat_input("질문을 입력하세요") or clicked
+    if not prompt:
+        return
 
-# 대화 히스토리 렌더
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-        if msg.get("sources"):
-            render_sources(msg["sources"])
-            st.caption(f"⚠️ {DISCLAIMER}")
-
-# 예시 질문 (대화 시작 전에만 노출)
-clicked = None
-if not st.session_state.messages:
-    st.write("**예시 질문**")
-    cols = st.columns(3)
-    examples = ["접근통제 관련 기준을 알려주세요", "개인정보 파기에 대한 요구사항은?", "위험평가는 어느 기준?"]
-    for col, ex in zip(cols, examples):
-        if col.button(ex, use_container_width=True):
-            clicked = ex
-
-prompt = st.chat_input("질문을 입력하세요") or clicked
-
-if prompt:
     if rate_limited():
         st.warning(f"질문이 너무 많습니다(시간당 {RATE_LIMIT_MAX}개 제한). 잠시 후 다시 시도하세요.")
-        st.stop()
+        return
     record_question()
 
     st.session_state.messages.append({"role": "user", "content": prompt})
@@ -160,41 +145,152 @@ if prompt:
         try:
             with st.spinner("관련 ISMS-P 기준을 검색하는 중..."):
                 sources = rag.retrieve(prompt, k=TOP_K)
-        except Exception as e:  # noqa: BLE001 - 인덱스 없음 등
+        except Exception as e:  # noqa: BLE001
             st.error("검색 중 오류가 발생했습니다. 인덱스가 생성되었는지 확인하세요 (`python build_index.py`).")
             with st.expander("오류 상세"):
                 st.code(str(e))
-            st.stop()
+            return
 
         try:
             answer_text = st.write_stream(rag.stream_answer(prompt, hits=sources))
-        except Exception as e:  # noqa: BLE001 - API 오류, 검색 결과는 보존
+        except Exception as e:  # noqa: BLE001
             answer_text = f"⚠️ {rag.friendly_error(e)}"
             st.error(answer_text)
 
         render_sources(sources)
         st.caption(f"⚠️ {DISCLAIMER}")
 
-    st.session_state.messages.append(
-        {"role": "assistant", "content": answer_text, "sources": sources}
+    st.session_state.messages.append({"role": "assistant", "content": answer_text, "sources": sources})
+
+
+# ── 모드 2: 사전 자가점검 (AI 보조 갭분석) ──────────────────────
+_BADGE = {"충족": "✅ 충족", "부분충족": "🟡 부분충족", "미흡": "❌ 미흡", "해당없음": "⚪ 해당없음"}
+
+
+def _build_report(category: str, results: list, counts: Counter) -> str:
+    lines = [
+        f"# ISMS-P 사전 자가점검 결과 — {category}",
+        "",
+        "> AI 보조 참고용 · 비공식. 결함 판단·인증 가부는 KISA 심사원/인증기관이 결정합니다.",
+        "",
+        "## 요약",
+        f"- 충족 {counts.get('충족', 0)} · 부분충족 {counts.get('부분충족', 0)} · "
+        f"미흡 {counts.get('미흡', 0)} · 해당없음 {counts.get('해당없음', 0)}",
+        "",
+        "## 기준별 결과",
+        "",
+    ]
+    for r in results:
+        lines.append(f"### ({r['id']}) {r['title']} — {r['status']}")
+        lines.append(f"- 근거: {r['rationale']}")
+        if r["recommendation"]:
+            lines.append(f"- 보완 권고: {r['recommendation']}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _render_results(category: str, results: list) -> None:
+    counts = Counter(r["status"] for r in results)
+    st.subheader(f"📋 자가점검 결과 — {category}")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("✅ 충족", counts.get("충족", 0))
+    c2.metric("🟡 부분충족", counts.get("부분충족", 0))
+    c3.metric("❌ 미흡", counts.get("미흡", 0))
+    c4.metric("⚪ 해당없음", counts.get("해당없음", 0))
+
+    for r in results:
+        st.markdown(f"**{_BADGE.get(r['status'], r['status'])}  ({r['id']}) {r['title']}**")
+        st.caption(f"근거: {r['rationale']}")
+        if r["recommendation"]:
+            st.caption(f"보완 권고: {r['recommendation']}")
+    st.caption(f"⚠️ {ASSESS_DISCLAIMER}")
+    st.download_button(
+        "📥 갭 리포트 내려받기 (.md)",
+        _build_report(category, results, counts),
+        file_name=f"자가점검_{category}.md",
+        mime="text/markdown",
     )
 
-# 사이드바
+
+def render_assessment() -> None:
+    st.caption(
+        "분야를 고르고 회사의 현황·증적을 입력하면, 해당 분야 기준별로 충족 여부를 AI가 "
+        "보조 판단하고 보완점을 제시합니다."
+    )
+    st.warning(f"⚠️ {ASSESS_DISCLAIMER}")
+
+    scope_label = st.radio("인증 범위", ["ISMS-P (101개)", "ISMS (80개)"], horizontal=True)
+    scope = "ISMS-P" if scope_label.startswith("ISMS-P") else "ISMS"
+
+    cats = assess.categories(scope)
+    labels = [f"{dom}  ›  {cat}" for dom, cat in cats]
+    sel = st.selectbox("점검할 분야", labels)
+    chosen_cat = cats[labels.index(sel)][1]
+
+    crit = assess.criteria_in_category(chosen_cat)
+    with st.expander(f"이 분야 기준 {len(crit)}개 — 무엇을 점검하나"):
+        for c in crit:
+            st.markdown(f"**({c['id']}) {c['title']}**")
+            st.caption(c.get("checklist") or c.get("summary", ""))
+
+    situation = st.text_area(
+        "우리 회사 현황·증적 (이 분야 관련 정책·운영 현황을 자유롭게 붙여넣기)",
+        height=200,
+        placeholder=(
+            "예) 비밀번호는 9자 이상·분기 1회 변경 강제, 5회 실패 시 계정 잠금. "
+            "관리자 계정은 별도 식별 후 MFA 적용. 접근권한은 팀장 승인 후 부여하고 반기 1회 검토함..."
+        ),
+    )
+
+    if st.button("자가점검 실행", type="primary"):
+        if rate_limited():
+            st.warning(f"요청이 너무 많습니다(시간당 {RATE_LIMIT_MAX}회 제한). 잠시 후 다시 시도하세요.")
+        elif not situation.strip():
+            st.warning("회사 현황·증적을 입력하세요.")
+        else:
+            record_question()
+            try:
+                with st.spinner("기준별 충족 여부를 분석하는 중..."):
+                    results = assess.assess_category(chosen_cat, situation)
+                st.session_state.assess_result = {"category": chosen_cat, "results": results}
+            except Exception as e:  # noqa: BLE001
+                st.session_state.pop("assess_result", None)
+                st.error(f"⚠️ {rag.friendly_error(e)}")
+
+    res = st.session_state.get("assess_result")
+    if res:
+        _render_results(res["category"], res["results"])
+
+
+# ── 메인 ───────────────────────────────────────────────────────
+if not require_auth():
+    st.stop()
+
+_prepare_index()
+
+st.info(
+    "ℹ️ 본 도구는 **비공식 참고용**입니다. 공식 인증기준은 "
+    "[KISA ISMS-P 자료실](https://isms.kisa.or.kr)에서 확인하세요."
+)
+st.title("🔐 ISMS-P 인증기준 도우미")
+
 with st.sidebar:
+    mode = st.radio("모드", ["💬 질문하기", "✅ 사전 자가점검"])
+    st.divider()
     st.header("ℹ️ 정보")
     st.markdown(
-        "**ISMS-P 인증기준 RAG 챗봇**\n\n"
-        "- 기준: ISMS-P 인증기준 **101개** (2023.11)\n"
-        "  - 관리체계 수립 및 운영 16\n"
-        "  - 보호대책 요구사항 64\n"
-        "  - 개인정보 처리단계별 요구사항 21\n"
+        "- 기준: ISMS-P **101개** (2023.11) — 관리체계 16 / 보호대책 64 / 개인정보 21\n"
         f"- 검색: 한국어 임베딩(`{EMBED_MODEL_NAME}`) + Chroma\n"
         "- 답변: Anthropic Claude (스트리밍)\n\n"
-        "답변은 검색된 기준에만 근거하며, 근거가 없으면 "
-        '"찾지 못했습니다"라고 답합니다(환각 억제).'
+        "답변은 검색된 기준에만 근거하며, 근거가 없으면 \"찾지 못했습니다\"라고 답합니다(환각 억제)."
     )
     st.divider()
     st.caption(f"📌 {DATA_DISCLAIMER}")
     if st.session_state.get("messages") and st.button("대화 초기화"):
         st.session_state.messages = []
         st.rerun()
+
+if mode.startswith("💬"):
+    render_chat()
+else:
+    render_assessment()

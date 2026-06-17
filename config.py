@@ -39,6 +39,13 @@ SIMILARITY_THRESHOLD = 0.40
 REQUEST_TIMEOUT = 30   # 초 (응답 지연 시 타임아웃)
 MAX_TOKENS = 1500
 
+# 사전 자가점검: 한 분야의 여러 기준을 한 번에 평가하므로 더 큰 출력 한도
+ASSESS_MAX_TOKENS = 4000
+ASSESS_DISCLAIMER = (
+    "이 자가점검 결과는 AI 보조 참고용입니다. 실제 결함 판단과 인증 가부는 KISA 인증심사원/"
+    "인증기관이 결정하며, 본 결과는 모의심사·사전 컨설팅을 대체하지 않습니다."
+)
+
 # 근거 부족 시 표준 응답
 NOT_FOUND_MESSAGE = "해당 내용은 제공된 ISMS-P 기준에서 찾지 못했습니다."
 
