@@ -1,0 +1,28 @@
+# 환경변수 / 비밀키 (절대 커밋 금지)
+.env
+.env.*
+!.env.example
+
+# 파이썬 가상환경
+venv/
+.venv/
+env/
+
+# 파이썬 캐시
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 벡터스토어 (Chroma) — 재생성 가능하므로 커밋 제외
+chroma_db/
+.chroma/
+data/chroma/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# 빌드 지시 문서 (포트폴리오 공개 repo에서는 제외)
+빌드지시서_ISMS-P_RAG챗봇.md
