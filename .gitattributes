@@ -1,0 +1,10 @@
+# 줄바꿈 정규화 — OS 간 LF/CRLF 경고 방지, 저장소엔 LF로 통일
+* text=auto eol=lf
+
+# 바이너리 파일은 정규화하지 않음
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
