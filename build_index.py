@@ -118,5 +118,20 @@ def sample_search(collection, model, query: str, k: int = TOP_K) -> None:
         print(f"        {rank}. [{cid}] {meta['title']}  ({meta['category']})  유사도={sim:.3f}")
 
 
+def index_exists() -> bool:
+    """벡터 인덱스(컬렉션)가 존재하고 비어있지 않은지 확인."""
+    try:
+        client = chromadb.PersistentClient(path=str(CHROMA_DIR))
+        return client.get_collection(COLLECTION_NAME).count() > 0
+    except Exception:
+        return False
+
+
+def ensure_index() -> None:
+    """인덱스가 없으면 빌드한다(배포 환경 첫 실행 대비). 이미 있으면 아무것도 하지 않는다."""
+    if not index_exists():
+        build_index()
+
+
 if __name__ == "__main__":
     build_index()

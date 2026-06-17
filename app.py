@@ -19,6 +19,7 @@ import os
 
 import streamlit as st
 
+from build_index import ensure_index
 from config import DISCLAIMER, EMBED_MODEL_NAME, TOP_K
 from rag import answer, retrieve
 
@@ -37,6 +38,16 @@ st.set_page_config(
     page_icon="🔐",
     layout="centered",
 )
+
+
+# 벡터 인덱스 준비 — 배포(클라우드) 첫 실행 시 자동 빌드, 로컬은 즉시 통과
+@st.cache_resource(show_spinner="최초 실행: 인증기준 색인을 준비하는 중입니다... (최대 1~2분)")
+def _prepare_index():
+    ensure_index()
+    return True
+
+
+_prepare_index()
 
 # 상단 고지문
 st.info(
