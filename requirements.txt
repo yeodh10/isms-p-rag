@@ -3,3 +3,5 @@ sentence-transformers
 chromadb
 streamlit
 python-dotenv
+# Streamlit Cloud 등 구버전 sqlite 환경 대응 (chromadb는 sqlite>=3.35 필요). 리눅스에서만 설치.
+pysqlite3-binary; platform_system == "Linux"
