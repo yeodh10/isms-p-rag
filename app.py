@@ -18,6 +18,7 @@ from collections import Counter
 import streamlit as st
 
 import assess
+import docparse
 import rag
 from build_index import ensure_index
 from config import (
@@ -205,11 +206,78 @@ def _render_results(category: str, results: list) -> None:
             st.caption(f"보완 권고: {r['recommendation']}")
     st.caption(f"⚠️ {ASSESS_DISCLAIMER}")
     st.download_button(
-        "📥 갭 리포트 내려받기 (.md)",
+        "📥 이 분야 갭 리포트 (.md)",
         _build_report(category, results, counts),
         file_name=f"자가점검_{category}.md",
         mime="text/markdown",
+        key=f"dl_{category}",
     )
+
+
+def _build_combined_report(assessments: dict, total: Counter) -> str:
+    lines = [
+        "# ISMS-P 사전 자가점검 — 통합 갭 리포트",
+        "",
+        "> AI 보조 참고용 · 비공식. 결함 판단·인증 가부는 KISA 심사원/인증기관이 결정합니다.",
+        "",
+        "## 전체 요약",
+        f"- 점검한 분야: {len(assessments)}개",
+        f"- 충족 {total.get('충족', 0)} · 부분충족 {total.get('부분충족', 0)} · "
+        f"미흡 {total.get('미흡', 0)} · 해당없음 {total.get('해당없음', 0)}",
+        "",
+    ]
+    for cat, results in assessments.items():
+        counts = Counter(r["status"] for r in results)
+        lines.append(f"## {cat}")
+        lines.append(
+            f"- 충족 {counts.get('충족', 0)} · 부분충족 {counts.get('부분충족', 0)} · "
+            f"미흡 {counts.get('미흡', 0)} · 해당없음 {counts.get('해당없음', 0)}"
+        )
+        lines.append("")
+        for r in results:
+            lines.append(f"### ({r['id']}) {r['title']} — {r['status']}")
+            lines.append(f"- 근거: {r['rationale']}")
+            if r["recommendation"]:
+                lines.append(f"- 보완 권고: {r['recommendation']}")
+            lines.append("")
+    return "\n".join(lines)
+
+
+def _render_cumulative(scope: str, assessments: dict) -> None:
+    st.divider()
+    st.subheader("📊 누적 갭 분석 (점검한 모든 분야 합산)")
+    total = Counter()
+    for results in assessments.values():
+        total.update(r["status"] for r in results)
+
+    all_cats = [c for _dom, c in assess.categories(scope)]
+    done = [c for c in all_cats if c in assessments]
+    st.progress(
+        min(len(done) / len(all_cats), 1.0) if all_cats else 0.0,
+        text=f"점검 완료: {len(done)} / {len(all_cats)} 분야",
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("✅ 충족", total.get("충족", 0))
+    c2.metric("🟡 부분충족", total.get("부분충족", 0))
+    c3.metric("❌ 미흡", total.get("미흡", 0))
+    c4.metric("⚪ 해당없음", total.get("해당없음", 0))
+
+    remaining = [c for c in all_cats if c not in assessments]
+    if remaining:
+        with st.expander(f"아직 점검하지 않은 분야 {len(remaining)}개"):
+            st.write(" · ".join(remaining))
+
+    st.download_button(
+        "📥 통합 갭 리포트 내려받기 (.md)",
+        _build_combined_report(assessments, total),
+        file_name="자가점검_통합리포트.md",
+        mime="text/markdown",
+        key="dl_combined",
+    )
+    if st.button("누적 결과 초기화", key="reset_assessments"):
+        st.session_state.assessments = {}
+        st.rerun()
 
 
 def render_assessment() -> None:
@@ -233,13 +301,26 @@ def render_assessment() -> None:
             st.markdown(f"**({c['id']}) {c['title']}**")
             st.caption(c.get("checklist") or c.get("summary", ""))
 
+    uploaded = st.file_uploader(
+        "문서 업로드 (PDF·DOCX·TXT) — 선택. 업로드하면 내용을 추출해 아래 입력창에 채웁니다.",
+        type=["pdf", "docx", "txt", "md"],
+    )
+    if uploaded is not None and st.session_state.get("_last_file") != uploaded.name:
+        try:
+            st.session_state.situation_input = docparse.extract_text(uploaded.name, uploaded.getvalue())
+            st.session_state._last_file = uploaded.name
+            st.rerun()
+        except Exception as e:  # noqa: BLE001
+            st.error(f"문서 텍스트 추출 실패: {e}")
+
     situation = st.text_area(
-        "우리 회사 현황·증적 (이 분야 관련 정책·운영 현황을 자유롭게 붙여넣기)",
+        "우리 회사 현황·증적 (직접 붙여넣거나, 위에서 문서 업로드)",
         height=200,
         placeholder=(
             "예) 비밀번호는 9자 이상·분기 1회 변경 강제, 5회 실패 시 계정 잠금. "
             "관리자 계정은 별도 식별 후 MFA 적용. 접근권한은 팀장 승인 후 부여하고 반기 1회 검토함..."
         ),
+        key="situation_input",
     )
 
     if st.button("자가점검 실행", type="primary"):
@@ -252,14 +333,15 @@ def render_assessment() -> None:
             try:
                 with st.spinner("기준별 충족 여부를 분석하는 중..."):
                     results = assess.assess_category(chosen_cat, situation)
-                st.session_state.assess_result = {"category": chosen_cat, "results": results}
+                st.session_state.setdefault("assessments", {})[chosen_cat] = results
             except Exception as e:  # noqa: BLE001
-                st.session_state.pop("assess_result", None)
                 st.error(f"⚠️ {rag.friendly_error(e)}")
 
-    res = st.session_state.get("assess_result")
-    if res:
-        _render_results(res["category"], res["results"])
+    assessments = st.session_state.get("assessments", {})
+    if chosen_cat in assessments:
+        _render_results(chosen_cat, assessments[chosen_cat])
+    if assessments:
+        _render_cumulative(scope, assessments)
 
 
 # ── 메인 ───────────────────────────────────────────────────────

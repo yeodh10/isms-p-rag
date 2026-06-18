@@ -72,6 +72,47 @@ def _strip_json(text: str) -> str:
     return t[start : end + 1] if start != -1 and end != -1 else t
 
 
+# 구조화 출력 스키마 — 모델이 항상 유효한 JSON을 내도록 강제(파싱 안정성)
+ASSESS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "assessments": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "status": {"type": "string", "enum": ["충족", "부분충족", "미흡", "해당없음"]},
+                    "rationale": {"type": "string"},
+                    "recommendation": {"type": "string"},
+                },
+                "required": ["id", "status", "rationale", "recommendation"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["assessments"],
+    "additionalProperties": False,
+}
+
+
+def _call_structured(client, user_msg: str):
+    """output_config 구조화 출력으로 호출. SDK가 해당 인자를 모르면 일반 호출로 폴백."""
+    kwargs = dict(
+        model=CLAUDE_MODEL,
+        max_tokens=ASSESS_MAX_TOKENS,
+        system=ASSESS_SYSTEM,
+        messages=[{"role": "user", "content": user_msg}],
+    )
+    try:
+        return client.messages.create(
+            **kwargs,
+            output_config={"format": {"type": "json_schema", "schema": ASSESS_SCHEMA}},
+        )
+    except TypeError:
+        return client.messages.create(**kwargs)  # 구버전 SDK 대비
+
+
 def assess_category(category: str, situation: str) -> list[dict]:
     """분야 내 각 기준에 대해 충족 여부를 보조 판단. {id,title,status,rationale,recommendation} 리스트 반환.
 
@@ -89,12 +130,7 @@ def assess_category(category: str, situation: str) -> list[dict]:
     )
 
     client = _get_anthropic()
-    resp = client.messages.create(
-        model=CLAUDE_MODEL,
-        max_tokens=ASSESS_MAX_TOKENS,
-        system=ASSESS_SYSTEM,
-        messages=[{"role": "user", "content": user}],
-    )
+    resp = _call_structured(client, user)
     text = "".join(b.text for b in resp.content if b.type == "text")
     data = json.loads(_strip_json(text))
 
