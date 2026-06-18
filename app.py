@@ -40,8 +40,8 @@ _CSS = """<style>
 .isms-hero .t {color: #ffffff; font-size: 1.6rem; font-weight: 700;}
 .isms-hero .s {color: #c7d2fe; font-size: 0.93rem; margin-top: 6px;}
 div.stButton > button {border-radius: 10px;}
-[data-testid="stMetric"] {background: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 8px 12px;}
+[data-testid="stMetric"] {background: #f8fafc;
+  border: 1px solid #e2e8f0; border-radius: 12px; padding: 8px 12px;}
 </style>"""
 
 _HERO = (
@@ -142,11 +142,17 @@ def render_chat() -> None:
     clicked = None
     if not st.session_state.messages:
         st.write("**예시 질문**")
-        cols = st.columns(3)
-        examples = ["접근통제 관련 기준을 알려주세요", "개인정보 파기에 대한 요구사항은?", "위험평가는 어느 기준?"]
-        for col, ex in zip(cols, examples):
-            if col.button(ex, use_container_width=True):
-                clicked = ex
+        examples = [
+            "접근통제 관련 기준을 알려주세요",
+            "개인정보 파기에 대한 요구사항은?",
+            "위험평가는 어느 기준?",
+            "비밀번호는 어떻게 관리하나요?",
+        ]
+        for i in range(0, len(examples), 2):
+            cols = st.columns(2)
+            for col, ex in zip(cols, examples[i : i + 2]):
+                if col.button(ex, use_container_width=True):
+                    clicked = ex
 
     prompt = st.chat_input("질문을 입력하세요") or clicked
     if not prompt:
