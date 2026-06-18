@@ -19,6 +19,7 @@ import streamlit as st
 
 import assess
 import docparse
+import example_situations
 import rag
 from build_index import ensure_index
 from config import (
@@ -337,6 +338,11 @@ def render_assessment() -> None:
         for c in crit:
             st.markdown(f"**({c['id']}) {c['title']}**")
             st.caption(c.get("checklist") or c.get("summary", ""))
+
+    if st.button("📝 예시 현황 채우기 (이 분야 샘플 5~6문장으로 시작)", key="fill_example"):
+        st.session_state.situation_input = example_situations.get(chosen_cat)
+        st.session_state.pop("_last_file", None)
+        st.rerun()
 
     uploaded = st.file_uploader(
         "문서 업로드 (PDF·DOCX·TXT) — 선택. 업로드하면 내용을 추출해 아래 입력창에 채웁니다.",
