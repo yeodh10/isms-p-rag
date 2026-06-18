@@ -31,7 +31,26 @@ from config import (
     TOP_K,
 )
 
+_CSS = """<style>
+[data-testid="stToolbar"], #MainMenu, footer {visibility: hidden; height: 0;}
+.block-container {padding-top: 2.2rem;}
+.isms-hero {background: linear-gradient(120deg, #4338ca 0%, #312e81 45%, #1e293b 100%);
+  border-radius: 14px; padding: 20px 26px; margin-bottom: 10px;
+  box-shadow: 0 8px 24px rgba(49,46,129,0.35);}
+.isms-hero .t {color: #ffffff; font-size: 1.6rem; font-weight: 700;}
+.isms-hero .s {color: #c7d2fe; font-size: 0.93rem; margin-top: 6px;}
+div.stButton > button {border-radius: 10px;}
+[data-testid="stMetric"] {background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 8px 12px;}
+</style>"""
+
+_HERO = (
+    '<div class="isms-hero"><div class="t">🔐 ISMS-P 인증기준 도우미</div>'
+    '<div class="s">인증기준 질의응답 + 사전 자가점검 · AI 보조 · 비공식 참고용</div></div>'
+)
+
 st.set_page_config(page_title="ISMS-P 인증기준 도우미", page_icon="🔐", layout="centered")
+st.markdown(_CSS, unsafe_allow_html=True)
 
 
 def _inject_secret(name: str) -> None:
@@ -166,6 +185,15 @@ def render_chat() -> None:
 
 # ── 모드 2: 사전 자가점검 (AI 보조 갭분석) ──────────────────────
 _BADGE = {"충족": "✅ 충족", "부분충족": "🟡 부분충족", "미흡": "❌ 미흡", "해당없음": "⚪ 해당없음"}
+_PILL = {"충족": "#16a34a", "부분충족": "#d97706", "미흡": "#dc2626", "해당없음": "#6b7280"}
+
+
+def _pill(status: str) -> str:
+    c = _PILL.get(status, "#6b7280")
+    return (
+        f'<span style="background:{c}22;color:{c};border:1px solid {c}66;'
+        f'padding:2px 10px;border-radius:999px;font-size:0.78rem;font-weight:700;">{status}</span>'
+    )
 
 
 def _build_report(category: str, results: list, counts: Counter) -> str:
@@ -200,7 +228,10 @@ def _render_results(category: str, results: list) -> None:
     c4.metric("⚪ 해당없음", counts.get("해당없음", 0))
 
     for r in results:
-        st.markdown(f"**{_BADGE.get(r['status'], r['status'])}  ({r['id']}) {r['title']}**")
+        st.markdown(
+            f"{_pill(r['status'])}&nbsp; <b>({r['id']}) {r['title']}</b>",
+            unsafe_allow_html=True,
+        )
         st.caption(f"근거: {r['rationale']}")
         if r["recommendation"]:
             st.caption(f"보완 권고: {r['recommendation']}")
@@ -350,11 +381,8 @@ if not require_auth():
 
 _prepare_index()
 
-st.info(
-    "ℹ️ 본 도구는 **비공식 참고용**입니다. 공식 인증기준은 "
-    "[KISA ISMS-P 자료실](https://isms.kisa.or.kr)에서 확인하세요."
-)
-st.title("🔐 ISMS-P 인증기준 도우미")
+st.markdown(_HERO, unsafe_allow_html=True)
+st.caption("ⓘ 공식 인증기준은 [KISA ISMS-P 자료실](https://isms.kisa.or.kr)에서 확인하세요.")
 
 with st.sidebar:
     mode = st.radio("모드", ["💬 질문하기", "✅ 사전 자가점검"])

@@ -1,0 +1,7 @@
+# Streamlit 테마 — 기본 다크 대신 정제된 슬레이트 + 인디고 액센트
+[theme]
+base = "dark"
+primaryColor = "#6366f1"
+backgroundColor = "#0f131a"
+secondaryBackgroundColor = "#1a2030"
+textColor = "#e7eaf0"
