@@ -41,8 +41,8 @@ _CSS = """<style>
 .isms-hero .t {color: #ffffff; font-size: 1.6rem; font-weight: 700;}
 .isms-hero .s {color: #c7d2fe; font-size: 0.93rem; margin-top: 6px;}
 div.stButton > button {border-radius: 10px;}
-[data-testid="stMetric"] {background: #f8fafc;
-  border: 1px solid #e2e8f0; border-radius: 12px; padding: 8px 12px;}
+[data-testid="stMetric"] {background: rgba(99,102,241,0.06);
+  border: 1px solid rgba(99,102,241,0.18); border-radius: 12px; padding: 8px 12px;}
 </style>"""
 
 _HERO = (
@@ -191,7 +191,6 @@ def render_chat() -> None:
 
 
 # ── 모드 2: 사전 자가점검 (AI 보조 갭분석) ──────────────────────
-_BADGE = {"충족": "✅ 충족", "부분충족": "🟡 부분충족", "미흡": "❌ 미흡", "해당없음": "⚪ 해당없음"}
 _PILL = {"충족": "#16a34a", "부분충족": "#d97706", "미흡": "#dc2626", "해당없음": "#6b7280"}
 
 
