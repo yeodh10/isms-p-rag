@@ -78,7 +78,10 @@ def _app_password():
 def require_auth() -> bool:
     pw = _app_password()
     if not pw:
-        return True
+        # fail-closed: APP_PASSWORD 미설정 시 공개하지 않고 잠근다(과거 무방비 공개 방지).
+        st.title("🔐 ISMS-P 인증기준 도우미")
+        st.error("앱이 잠겨 있습니다. 관리자가 Streamlit Secrets에 APP_PASSWORD를 설정해야 이용할 수 있습니다.")
+        return False
     if st.session_state.get("authed"):
         return True
     st.title("🔐 ISMS-P 인증기준 도우미")
@@ -92,18 +95,46 @@ def require_auth() -> bool:
     return False
 
 
-# ── 세션 레이트리밋 (모드 공유) ─────────────────────────────────
-def _recent_q_times() -> list:
-    now = time.time()
-    return [t for t in st.session_state.get("q_times", []) if now - t < RATE_LIMIT_WINDOW_SEC]
+# ── 레이트리밋 (IP 전역 + 세션 폴백) ────────────────────────────
+# 세션(탭) 단위만 쓰면 새 탭마다 카운터가 리셋돼 우회된다(API 비용 남용).
+# Streamlit Cloud 프록시의 X-Forwarded-For로 클라이언트 IP를 얻어 프로세스
+# 전역 dict로 제한한다. IP를 못 얻으면 세션 단위로 폴백(과도 차단 방지).
+_GLOBAL_HITS: dict = {}
+
+
+def _client_ip() -> str:
+    try:
+        h = st.context.headers
+        xff = h.get("X-Forwarded-For") or h.get("x-forwarded-for")
+        if xff:
+            return xff.split(",")[0].strip()
+    except Exception:
+        pass
+    return "?"
+
+
+def _recent(times: list, now: float) -> list:
+    return [t for t in times if now - t < RATE_LIMIT_WINDOW_SEC]
 
 
 def rate_limited() -> bool:
-    return len(_recent_q_times()) >= RATE_LIMIT_MAX
+    now = time.time()
+    ip = _client_ip()
+    if ip != "?":
+        return len(_recent(_GLOBAL_HITS.get(ip, []), now)) >= RATE_LIMIT_MAX
+    return len(_recent(st.session_state.get("q_times", []), now)) >= RATE_LIMIT_MAX
 
 
 def record_question() -> None:
-    st.session_state.q_times = _recent_q_times() + [time.time()]
+    now = time.time()
+    ip = _client_ip()
+    if ip != "?":
+        _GLOBAL_HITS[ip] = _recent(_GLOBAL_HITS.get(ip, []), now) + [now]
+        if len(_GLOBAL_HITS) > 5000:  # 비활성 IP 정리(무한 증가 방지)
+            for k in [k for k, v in list(_GLOBAL_HITS.items()) if not _recent(v, now)]:
+                _GLOBAL_HITS.pop(k, None)
+    else:
+        st.session_state.q_times = _recent(st.session_state.get("q_times", []), now) + [now]
 
 
 @st.cache_resource(show_spinner="최초 실행: 인증기준 색인을 준비하는 중입니다... (최대 1~2분)")
